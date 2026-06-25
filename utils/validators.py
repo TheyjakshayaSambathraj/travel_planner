@@ -30,7 +30,7 @@ def build_travel_request(
     destination: str,
     days: int,
     budget: int,
-    travel_style: str,
+    persona: str,
     interests: List[str],
 ) -> TravelRequest:
     if not destination or not destination.strip():
@@ -39,13 +39,13 @@ def build_travel_request(
         raise ValidationError("Number of days must be at least 1.")
     if budget < 1:
         raise ValidationError("Budget must be a positive value.")
-    if not travel_style or not travel_style.strip():
-        raise ValidationError("Travel style is required.")
+    if not persona or not persona.strip():
+        raise ValidationError("Persona is required.")
 
     return TravelRequest(
         destination=destination.strip(),
         days=days,
         budget=budget,
-        travel_style=travel_style.strip(),
+        persona=persona.strip(),
         interests=interests,
     )

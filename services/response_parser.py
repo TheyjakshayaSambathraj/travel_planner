@@ -2,7 +2,20 @@ from __future__ import annotations
 
 import json
 import re
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Type, TypeVar
+
+from models.agent_outputs import (
+    BudgetOutput,
+    FeasibilityOutput,
+    FoodOutput,
+    ItineraryOutput,
+    PackingOutput,
+    ResearchOutput,
+    SafetyOutput,
+    TripSummaryOutput,
+)
+
+ModelType = TypeVar("ModelType")
 
 
 class ResponseParser:
@@ -31,6 +44,12 @@ class ResponseParser:
         return parsed
 
     @staticmethod
+    def _validate_model(model_class: Type[ModelType], payload: Dict[str, Any]) -> ModelType:
+        if hasattr(model_class, "model_validate"):
+            return model_class.model_validate(payload)  # type: ignore[attr-defined]
+        return model_class.parse_obj(payload)  # type: ignore[attr-defined]
+
+    @staticmethod
     def _as_list(value: Any) -> List[str]:
         if isinstance(value, list):
             return [str(item).strip() for item in value if str(item).strip()]
@@ -41,47 +60,63 @@ class ResponseParser:
     @classmethod
     def parse_itinerary(cls, text: str, days: int) -> Dict[str, List[str]]:
         parsed = cls.parse_json(text)
-        itinerary: Dict[str, List[str]] = {}
-        for day_index in range(1, days + 1):
-            key = f"day{day_index}"
-            itinerary[key] = cls._as_list(parsed.get(key, []))
-        return itinerary
+        days_payload = parsed.get("days", [])
+        if not isinstance(days_payload, list):
+            raise ValueError("Itinerary response must contain a days array.")
+
+        if len(days_payload) != days:
+            raise ValueError("Itinerary response did not include all requested days.")
+
+        normalized_days = []
+        for day_payload in days_payload:
+            if not isinstance(day_payload, dict):
+                raise ValueError("Each itinerary day must be an object.")
+            normalized_days.append(
+                {
+                    "day": day_payload.get("day", 0),
+                    "morning": cls._as_list(day_payload.get("morning", [])),
+                    "afternoon": cls._as_list(day_payload.get("afternoon", [])),
+                    "evening": cls._as_list(day_payload.get("evening", [])),
+                }
+            )
+
+        return cls._validate_model(ItineraryOutput, {"days": normalized_days})
 
     @classmethod
-    def parse_budget(cls, text: str, budget: int) -> Dict[str, int]:
+    def parse_budget(cls, text: str, budget: int) -> BudgetOutput:
         parsed = cls.parse_json(text)
-        allocations = {
-            "stay": int(parsed.get("stay", 0) or 0),
-            "food": int(parsed.get("food", 0) or 0),
-            "transport": int(parsed.get("transport", 0) or 0),
-            "activities": int(parsed.get("activities", 0) or 0),
-        }
-        total = sum(allocations.values())
+        model = cls._validate_model(BudgetOutput, parsed)
+        total = model.accommodation + model.food + model.transport + model.activities + model.emergency_buffer
         if total > budget and total > 0:
-            ratio = budget / total
-            allocations = {key: int(value * ratio) for key, value in allocations.items()}
-        return allocations
+            raise ValueError("Budget allocation exceeds the available budget.")
+        return model
 
     @classmethod
-    def parse_food(cls, text: str) -> Dict[str, List[str]]:
+    def parse_food(cls, text: str) -> FoodOutput:
         parsed = cls.parse_json(text)
-        return {
-            "must_try": cls._as_list(parsed.get("must_try", [])),
-            "recommended_restaurants": cls._as_list(parsed.get("recommended_restaurants", [])),
-        }
+        return cls._validate_model(FoodOutput, parsed)
 
     @classmethod
-    def parse_packing(cls, text: str) -> Dict[str, List[str]]:
+    def parse_packing(cls, text: str) -> PackingOutput:
         parsed = cls.parse_json(text)
-        return {
-            "essentials": cls._as_list(parsed.get("essentials", [])),
-            "travel_items": cls._as_list(parsed.get("travel_items", [])),
-        }
+        return cls._validate_model(PackingOutput, parsed)
 
     @classmethod
-    def parse_safety(cls, text: str) -> Dict[str, List[str]]:
+    def parse_safety(cls, text: str) -> SafetyOutput:
         parsed = cls.parse_json(text)
-        return {
-            "tips": cls._as_list(parsed.get("tips", [])),
-            "warnings": cls._as_list(parsed.get("warnings", [])),
-        }
+        return cls._validate_model(SafetyOutput, parsed)
+
+    @classmethod
+    def parse_research(cls, text: str) -> ResearchOutput:
+        parsed = cls.parse_json(text)
+        return cls._validate_model(ResearchOutput, parsed)
+
+    @classmethod
+    def parse_summary(cls, text: str) -> TripSummaryOutput:
+        parsed = cls.parse_json(text)
+        return cls._validate_model(TripSummaryOutput, parsed)
+
+    @classmethod
+    def parse_feasibility(cls, text: str) -> FeasibilityOutput:
+        parsed = cls.parse_json(text)
+        return cls._validate_model(FeasibilityOutput, parsed)

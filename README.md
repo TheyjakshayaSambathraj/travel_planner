@@ -1,6 +1,6 @@
 # TripMind AI
 
-TripMind AI is a Version 1 MVP for AI-powered travel planning. Users enter a destination, number of days, budget, travel style, and interests. The app then generates a personalized itinerary, budget allocation, local food recommendations, packing checklist, and travel safety tips through a modular orchestration layer.
+TripMind AI is a multi-agent travel planning assistant. Users enter a destination, number of days, budget, persona, and interests. The app then generates destination research, feasibility analysis, a day-wise itinerary, budget allocation, local food recommendations, packing checklist, travel safety tips, trip intelligence, AI insights, and an executive trip summary through a modular orchestration layer.
 
 The LLM stack is provider-agnostic with automatic failover across Gemini, Groq, OpenRouter, and OpenAI.
 
@@ -10,9 +10,14 @@ This MVP focuses on the core travel planning workflow only.
 
 Included in V1:
 - Streamlit UI
-- Gemini service layer
+- Provider-agnostic LLM manager with failover
 - Pydantic travel request model
-- Five specialized agents
+- Feasibility agent
+- Research agent
+- Five specialized planning agents
+- Trip summary agent
+- SQLite trip history
+- PDF travel dossier export
 - Travel orchestrator
 - Result dashboard
 
@@ -32,22 +37,27 @@ Excluded from V1:
 flowchart TD
     U[User] --> UI[Streamlit UI]
     UI --> O[Travel Orchestrator]
-    O --> I[Itinerary Agent]
-    O --> B[Budget Agent]
-    O --> F[Food Agent]
-    O --> P[Packing Agent]
-    O --> S[Safety Agent]
-    I --> M[LLM Manager]
+    O --> X[Feasibility Agent]
+    O --> R[Research Agent]
+    R --> I[Itinerary Agent]
+    I --> B[Budget Agent]
+    B --> F[Food Agent]
+    F --> P[Packing Agent]
+    P --> S[Safety Agent]
+    S --> T[Trip Summary Agent]
+    R --> M[LLM Manager]
+    I --> M
     B --> M
     F --> M
     P --> M
     S --> M
+    T --> M
     M --> P1[GeminiProvider]
     M --> P2[GroqProvider]
     M --> P3[OpenRouterProvider]
     M --> P4[OpenAIProvider]
-    O --> T[TravelPackage]
-    T --> UI
+    O --> X1[TravelPackage]
+    X1 --> UI
 ```
 
 ## Failover Strategy
@@ -61,11 +71,13 @@ flowchart TD
 ## Agent Workflow
 
 1. The user submits a trip request in Streamlit.
-2. The UI validates input and creates a `TravelRequest`.
-3. The `TravelOrchestrator` runs the agents in sequence.
-4. Each agent uses `GeminiService` to generate structured output.
-5. The orchestrator aggregates results into a `TravelPackage`.
-6. The UI renders the final trip plan in tabs.
+2. The UI validates input and creates a `TravelRequest` with a persona.
+3. The `TravelOrchestrator` runs the feasibility agent first.
+4. The orchestrator runs the research agent and then passes research context into the itinerary, budget, food, packing, safety, and summary agents.
+5. Each agent calls the shared `LLMManager`, which handles provider selection and failover.
+6. Responses are validated with Pydantic models before rendering.
+7. The orchestrator aggregates results into a `TravelPackage`.
+8. The UI renders feasibility, analytics, timeline cards, recent trips, and summary metrics.
 
 ## Tech Stack
 
@@ -74,7 +86,8 @@ flowchart TD
 - Gemini 2.5 Flash
 - Pydantic
 - dotenv
-- SQLite: not used in V1
+- reportlab
+- SQLite
 
 ## Installation Guide
 
@@ -89,6 +102,9 @@ pip install -r requirements.txt
 
 ```env
 GEMINI_API_KEY=your_api_key_here
+GROQ_API_KEY=your_groq_key_here
+OPENROUTER_API_KEY=your_openrouter_key_here
+OPENAI_API_KEY=your_openai_key_here
 ```
 
 4. Run the app:
@@ -106,10 +122,7 @@ streamlit run app.py
 
 ## Future Enhancements
 
-- Trip saving and history
-- PDF export
 - Authentication
-- SQLite persistence
 - Maps and weather integrations
 - Swappable agent backends for SmolAgents or other orchestration frameworks
 - Richer structured output validation and retry logic
