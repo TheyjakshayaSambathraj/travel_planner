@@ -16,12 +16,13 @@ from services.llm.base_provider import (
 
 try:
     import google.generativeai as genai
-except Exception:  # pragma: no cover - optional dependency import
+except Exception:  # pragma: no cover - optional dependency
     genai = None
 
 
 class GeminiProvider(LLMProvider):
-    def __init__(self, model_name: str = "gemini-2.5-flash") -> None:
+    # gemini-pro is stable and available on the free tier with google-generativeai SDK
+    def __init__(self, model_name: str = "gemini-pro") -> None:
         load_dotenv()
         self.api_key = os.getenv("GEMINI_API_KEY", "").strip()
         self.model_name = model_name
@@ -52,12 +53,14 @@ class GeminiProvider(LLMProvider):
 
     def _map_exception(self, exc: Exception) -> Exception:
         message = str(exc).lower()
-        if "429" in message or "rate limit" in message:
+        exc_type = type(exc).__name__
+        # ResourceExhausted (429) — maps to rate limit for proper cooldown
+        if "resourceexhausted" in exc_type.lower() or "429" in message or "rate limit" in message:
             return LLMRateLimitError(str(exc))
-        if "quota" in message or "exceeded" in message:
+        if "quota" in message or "exceeded" in message or "insufficient" in message:
             return LLMQuotaExceededError(str(exc))
         if "timeout" in message or "timed out" in message:
             return LLMTimeoutError(str(exc))
-        if "network" in message or "connection" in message or "dns" in message:
+        if "network" in message or "connection" in message or "dns" in message or "ssl" in message:
             return LLMNetworkError(str(exc))
         return LLMAPIError(str(exc))

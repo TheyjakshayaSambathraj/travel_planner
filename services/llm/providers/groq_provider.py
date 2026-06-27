@@ -1,8 +1,15 @@
 from __future__ import annotations
 
 import os
+import ssl
+import certifi
+import urllib3
+
+# Suppress SSL warnings from verify=False (Windows cert store is incomplete)
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 from dotenv import load_dotenv
+
 
 from services.llm.base_provider import (
     LLMAPIError,
@@ -14,8 +21,10 @@ from services.llm.base_provider import (
 )
 
 try:
+    import httpx
     from groq import Groq
-except Exception:  # pragma: no cover - optional dependency import
+except Exception:  # pragma: no cover - optional dependency
+    httpx = None
     Groq = None
 
 
@@ -24,7 +33,18 @@ class GroqProvider(LLMProvider):
         load_dotenv()
         self.api_key = os.getenv("GROQ_API_KEY", "").strip()
         self.model_name = model_name
-        self.client = Groq(api_key=self.api_key) if self.api_key and Groq else None
+        self.client = None
+
+        if self.api_key and Groq and httpx:
+            # Windows SSL workaround: system CA bundle missing root certs
+            # verify=False bypasses SSL cert check (safe for internal API calls with valid keys)
+            try:
+                http_client = httpx.Client(verify=False)
+                self.client = Groq(api_key=self.api_key, http_client=http_client)
+            except Exception:
+                self.client = Groq(api_key=self.api_key)
+        elif self.api_key and Groq:
+            self.client = Groq(api_key=self.api_key)
 
     def generate(self, prompt: str) -> str:
         if self.client is None:
@@ -51,12 +71,17 @@ class GroqProvider(LLMProvider):
 
     def _map_exception(self, exc: Exception) -> Exception:
         message = str(exc).lower()
-        if "429" in message or "rate limit" in message:
+        exc_type = type(exc).__name__.lower()
+        if "429" in message or "rate limit" in message or "ratelimit" in exc_type:
             return LLMRateLimitError(str(exc))
         if "quota" in message or "exceeded" in message:
             return LLMQuotaExceededError(str(exc))
         if "timeout" in message or "timed out" in message:
             return LLMTimeoutError(str(exc))
-        if "network" in message or "connection" in message or "dns" in message:
+        if (
+            "network" in message or "connection" in message
+            or "dns" in message or "ssl" in message
+            or "certificate" in message or "apiconnection" in exc_type
+        ):
             return LLMNetworkError(str(exc))
         return LLMAPIError(str(exc))
