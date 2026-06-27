@@ -29,7 +29,7 @@ class ResponseParser:
         if object_match:
             return object_match.group(0)
 
-        raise ValueError("No JSON object found in Gemini response.")
+        raise ValueError("No JSON object found in LLM response.")
 
     @classmethod
     def parse_json(cls, text: str) -> Dict[str, Any]:
@@ -37,10 +37,10 @@ class ResponseParser:
         try:
             parsed = json.loads(json_text)
         except json.JSONDecodeError as exc:
-            raise ValueError("Gemini response was not valid JSON.") from exc
+            raise ValueError("LLM response was not valid JSON.") from exc
 
         if not isinstance(parsed, dict):
-            raise ValueError("Gemini response must be a JSON object.")
+            raise ValueError("LLM response must be a JSON object.")
         return parsed
 
     @staticmethod
@@ -58,7 +58,28 @@ class ResponseParser:
         return []
 
     @classmethod
-    def parse_itinerary(cls, text: str, days: int) -> Dict[str, List[str]]:
+    def _as_activity_list(cls, value: Any) -> List[Dict[str, str]]:
+        if value is None:
+            return []
+        if isinstance(value, str):
+            items = [item.strip() for item in value.split("\n")]
+            return [{"activity": item, "location": ""} for item in items if item]
+        if not isinstance(value, list):
+            return []
+
+        activities: List[Dict[str, str]] = []
+        for item in value:
+            if isinstance(item, dict):
+                activity = str(item.get("activity", "")).strip()
+                location = str(item.get("location", "")).strip()
+                if activity:
+                    activities.append({"activity": activity, "location": location})
+            elif isinstance(item, str) and item.strip():
+                activities.append({"activity": item.strip(), "location": ""})
+        return activities
+
+    @classmethod
+    def parse_itinerary(cls, text: str, days: int) -> ItineraryOutput:
         parsed = cls.parse_json(text)
         days_payload = parsed.get("days", [])
         if not isinstance(days_payload, list):
@@ -74,9 +95,9 @@ class ResponseParser:
             normalized_days.append(
                 {
                     "day": day_payload.get("day", 0),
-                    "morning": cls._as_list(day_payload.get("morning", [])),
-                    "afternoon": cls._as_list(day_payload.get("afternoon", [])),
-                    "evening": cls._as_list(day_payload.get("evening", [])),
+                    "morning": cls._as_activity_list(day_payload.get("morning", [])),
+                    "afternoon": cls._as_activity_list(day_payload.get("afternoon", [])),
+                    "evening": cls._as_activity_list(day_payload.get("evening", [])),
                 }
             )
 

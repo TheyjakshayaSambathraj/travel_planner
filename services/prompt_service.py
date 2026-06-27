@@ -76,9 +76,11 @@ Example:
     def build_research_prompt(cls, destination: str) -> str:
         return cls._build_prompt(
             role="an expert destination research analyst",
-            task="Research the destination and provide concise travel intelligence.",
+            task=f"Research {destination} and provide concise, factual travel intelligence with real place names.",
             constraints=[
                 f"Destination: {destination}",
+                "Use real neighborhoods, landmarks, transit options, and attractions specific to this destination.",
+                "Never use generic placeholders like 'city museum' or 'local bazaar' without naming the actual place when known.",
                 "Focus on travel-relevant context, attractions, transit, and timing.",
                 "Return JSON only.",
             ],
@@ -102,20 +104,28 @@ Example:
     def build_itinerary_prompt(cls, request: TravelRequest, research: Dict) -> str:
         return cls._build_prompt(
             role="an expert itinerary planner",
-            task="Generate a balanced day-wise itinerary using destination research.",
+            task=f"Generate a unique, realistic {request.days}-day itinerary for {request.destination}.",
             constraints=[
                 *cls._base_constraints(request),
                 f"Destination research: {research}",
-                "Avoid duplicate locations and balance morning, afternoon, and evening activities.",
-                "Tailor activities to the chosen persona.",
+                "CRITICAL: Every day must be completely unique — never repeat attractions, restaurants, neighborhoods, or activities across days.",
+                "Use real place names: actual landmarks, museums, neighborhoods, restaurants, bars, and streets in the destination.",
+                "Never write generic phrases like 'visit a highlight related to X' or 'enjoy dinner with a relaxed evening plan'.",
+                "Each activity must include a specific location (real venue, neighborhood, or landmark).",
+                "Day 1: arrival, local orientation, nearby attractions.",
+                "Middle days: major landmarks, museums, food streets, hidden gems, shopping, persona-aligned experiences.",
+                f"Day {request.days}: relaxation, souvenir shopping, departure preparation.",
+                "Balance morning, afternoon, and evening with distinct activities.",
+                "Tailor pacing and venues to the chosen persona and interests.",
+                f"Generate exactly {request.days} days.",
             ],
             output_format={
                 "days": [
                     {
                         "day": 1,
-                        "morning": [{"activity": "...", "location": "..."}],
-                        "afternoon": [{"activity": "...", "location": "..."}],
-                        "evening": [{"activity": "...", "location": "..."}],
+                        "morning": [{"activity": "...", "location": "Real place name"}],
+                        "afternoon": [{"activity": "...", "location": "Real place name"}],
+                        "evening": [{"activity": "...", "location": "Real place name"}],
                     }
                 ]
             },
@@ -123,17 +133,56 @@ Example:
                 "days": [
                     {
                         "day": 1,
-                        "morning": [{"activity": "Sunrise walk and breakfast", "location": "Miramar Beach"}],
-                        "afternoon": [{"activity": "Explore heritage lanes", "location": "Fontainhas"}],
-                        "evening": [{"activity": "Dinner by the waterfront", "location": "Panaji promenade"}],
+                        "morning": [{"activity": "Arrival and coffee at Caffè Florian", "location": "Piazza San Marco, Venice"}],
+                        "afternoon": [{"activity": "Explore St. Mark's Basilica", "location": "San Marco, Venice"}],
+                        "evening": [{"activity": "Sunset walk at Rialto Bridge", "location": "San Polo, Venice"}],
                     },
                     {
                         "day": 2,
-                        "morning": [{"activity": "Market stroll", "location": "local bazaar"}],
-                        "afternoon": [{"activity": "Museum visit", "location": "city museum"}],
-                        "evening": [{"activity": "Sunset viewpoint", "location": "hilltop lookout"}],
+                        "morning": [{"activity": "Tour Doge's Palace", "location": "Piazza San Marco, Venice"}],
+                        "afternoon": [{"activity": "Wander Cannaregio canals", "location": "Cannaregio, Venice"}],
+                        "evening": [{"activity": "Wine bars in Cannaregio", "location": "Fondamenta della Misericordia"}],
                     },
                 ]
+            },
+        )
+
+    @classmethod
+    def build_itinerary_day_prompt(
+        cls,
+        request: TravelRequest,
+        research: Dict,
+        day_number: int,
+        excluded_activities: List[str],
+    ) -> str:
+        return cls._build_prompt(
+            role="an expert itinerary planner",
+            task=f"Regenerate ONLY day {day_number} for {request.destination} with completely new activities.",
+            constraints=[
+                *cls._base_constraints(request),
+                f"Destination research: {research}",
+                f"Day number: {day_number} of {request.days}",
+                "Do NOT reuse any of these already-planned activities or locations:",
+                *(f"- {item}" for item in excluded_activities[:40]),
+                "Use real, specific place names in the destination.",
+                "Never repeat attractions, restaurants, or neighborhoods from the excluded list.",
+                "Return JSON for a single day only.",
+            ],
+            output_format={
+                "day": {
+                    "day": day_number,
+                    "morning": [{"activity": "...", "location": "..."}],
+                    "afternoon": [{"activity": "...", "location": "..."}],
+                    "evening": [{"activity": "...", "location": "..."}],
+                }
+            },
+            example={
+                "day": {
+                    "day": day_number,
+                    "morning": [{"activity": "Gondola ride on quiet canals", "location": "Dorsoduro, Venice"}],
+                    "afternoon": [{"activity": "Peggy Guggenheim Collection", "location": "Dorsoduro, Venice"}],
+                    "evening": [{"activity": "Cicchetti crawl", "location": "Campo Santa Margherita"}],
+                }
             },
         )
 
@@ -148,7 +197,7 @@ Example:
                 f"Itinerary: {itinerary}",
                 "Do not exceed the total budget.",
                 "Include an emergency_buffer reserve.",
-                "Explain allocation_reasoning in one concise sentence.",
+                "Reference real destination cost patterns in allocation_reasoning.",
                 "Make the allocation reflect the chosen persona and itinerary intensity.",
             ],
             output_format={
@@ -177,7 +226,8 @@ Example:
             constraints=[
                 *cls._base_constraints(request),
                 f"Destination research: {research}",
-                "Focus on authentic local cuisine and avoid generic tourist-only recommendations.",
+                "Recommend real restaurants, dishes, and food streets specific to the destination.",
+                "Never use generic entries like 'local restaurant' or 'regional curry' without naming the dish and area.",
                 "Make suggestions appropriate for the chosen persona.",
             ],
             output_format={
@@ -202,7 +252,8 @@ Example:
             constraints=[
                 *cls._base_constraints(request),
                 f"Destination research: {research}",
-                "Use destination climate context and the chosen persona.",
+                "Use destination climate, culture, and the chosen persona.",
+                "Reference specific conditions for the destination (monsoon, winter, altitude, etc.) when relevant.",
             ],
             output_format={
                 "essentials": ["..."],
@@ -226,7 +277,8 @@ Example:
             constraints=[
                 *cls._base_constraints(request),
                 f"Destination research: {research}",
-                "Avoid generic advice and focus on practical, destination-specific guidance.",
+                "Provide destination-specific safety guidance with real neighborhoods, scams, or customs where relevant.",
+                "Avoid generic advice — tailor to the actual destination.",
             ],
             output_format={
                 "travel_tips": ["..."],
@@ -266,6 +318,8 @@ Example:
                 f"Food: {food}",
                 f"Packing: {packing}",
                 f"Safety: {safety}",
+                "Reference real places and experiences from the itinerary in highlights and insights.",
+                "Never use generic phrases like 'visit a highlight' or 'local secret spot'.",
                 "Trip score must be a float from 0 to 10.",
                 "Estimated total cost must be an integer.",
                 "Include trip intelligence, AI insights, and analytics summary sections.",

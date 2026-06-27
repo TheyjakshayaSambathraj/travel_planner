@@ -1,13 +1,16 @@
 from __future__ import annotations
 
+from datetime import datetime
 from io import BytesIO
-from typing import Optional
+from typing import List, Optional
 
 from reportlab.lib import colors
+from reportlab.lib.enums import TA_CENTER, TA_LEFT
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import inch
 from reportlab.platypus import (
+    HRFlowable,
     PageBreak,
     Paragraph,
     SimpleDocTemplate,
@@ -15,107 +18,381 @@ from reportlab.platypus import (
     Table,
     TableStyle,
 )
-
 from models.travel_package import TravelPackage
 from models.travel_request import TravelRequest
 
 
 class TravelDossierExporter:
+    BRAND_BLUE = colors.HexColor("#3B82F6")
+    BRAND_PURPLE = colors.HexColor("#8B5CF6")
+    BRAND_EMERALD = colors.HexColor("#10B981")
+    DARK = colors.HexColor("#0F172A")
+    MUTED = colors.HexColor("#64748B")
+    LIGHT_BG = colors.HexColor("#F8FAFC")
+
+    def __init__(self) -> None:
+        self._styles = None
+
     def export(self, request: TravelRequest, trip_package: TravelPackage) -> bytes:
         buffer = BytesIO()
         doc = SimpleDocTemplate(
             buffer,
             pagesize=A4,
-            rightMargin=36,
-            leftMargin=36,
-            topMargin=36,
-            bottomMargin=36,
+            rightMargin=48,
+            leftMargin=48,
+            topMargin=54,
+            bottomMargin=54,
         )
+        styles = self._build_styles()
+        story: List = []
 
-        styles = getSampleStyleSheet()
-        styles.add(ParagraphStyle(name="SectionTitle", parent=styles["Heading2"], textColor=colors.HexColor("#0F766E")))
-        styles.add(ParagraphStyle(name="CoverTitle", parent=styles["Title"], alignment=1, textColor=colors.HexColor("#0F172A")))
-        styles.add(ParagraphStyle(name="CoverSubTitle", parent=styles["BodyText"], alignment=1, leading=16))
-
-        story = []
-        story.append(Spacer(1, 1.2 * inch))
-        story.append(Paragraph("TripMind AI", styles["CoverTitle"]))
-        story.append(Spacer(1, 0.15 * inch))
-        story.append(Paragraph("Travel Dossier", styles["CoverSubTitle"]))
-        story.append(Spacer(1, 0.5 * inch))
-        story.append(Paragraph(f"Destination: {request.destination}", styles["Heading2"]))
-        story.append(Paragraph(f"Persona: {request.persona}", styles["BodyText"]))
-        story.append(Paragraph(f"Days: {request.days} | Budget: ₹{request.budget:,}", styles["BodyText"]))
-        story.append(Paragraph(f"Trip Score: {trip_package.summary.trip_score:.1f}/10", styles["BodyText"]))
+        self._add_cover(story, styles, request, trip_package)
         story.append(PageBreak())
+        self._add_executive_summary(story, styles, trip_package)
+        self._add_trip_metrics(story, styles, request, trip_package)
+        self._add_destination_intelligence(story, styles, trip_package)
+        self._add_itinerary(story, styles, trip_package)
+        self._add_budget(story, styles, trip_package)
+        self._add_food_guide(story, styles, trip_package)
+        self._add_packing(story, styles, trip_package)
+        self._add_safety(story, styles, trip_package)
+        self._add_insights(story, styles, trip_package)
 
-        self._add_section(story, styles, "Executive Summary", [trip_package.summary.overall_summary])
-        self._add_section(story, styles, "Destination Intelligence", [trip_package.research.destination_overview, f"Best time to visit: {trip_package.research.best_time_to_visit}"] + trip_package.research.key_highlights)
-        self._add_itinerary_section(story, styles, trip_package)
-        self._add_budget_section(story, styles, trip_package)
-        self._add_list_section(story, styles, "Food Recommendations", trip_package.food.must_try_foods + trip_package.food.street_foods + trip_package.food.recommended_restaurants + trip_package.food.food_tips)
-        self._add_list_section(story, styles, "Packing Checklist", trip_package.packing.essentials + trip_package.packing.weather_items + trip_package.packing.electronics + trip_package.packing.documents)
-        self._add_list_section(story, styles, "Safety Guide", trip_package.safety.travel_tips + trip_package.safety.warnings + trip_package.safety.local_etiquette + trip_package.safety.emergency_contacts)
-        self._add_list_section(story, styles, "Travel Insights", trip_package.summary.ai_insights.money_saving_tips + trip_package.summary.ai_insights.hidden_gems + trip_package.summary.ai_insights.avoid + trip_package.summary.ai_insights.best_experiences + trip_package.summary.ai_insights.local_secrets)
-
-        doc.build(story)
+        doc.build(story, onFirstPage=self._footer, onLaterPages=self._footer)
         pdf_bytes = buffer.getvalue()
         buffer.close()
         return pdf_bytes
 
-    def _add_section(self, story, styles, title: str, paragraphs: list[str]) -> None:
-        story.append(Paragraph(title, styles["SectionTitle"]))
-        story.append(Spacer(1, 0.1 * inch))
-        for paragraph in paragraphs:
-            story.append(Paragraph(paragraph or "", styles["BodyText"]))
-            story.append(Spacer(1, 0.08 * inch))
-        story.append(Spacer(1, 0.18 * inch))
+    def _build_styles(self):
+        if self._styles is not None:
+            return self._styles
+        styles = getSampleStyleSheet()
+        styles.add(
+            ParagraphStyle(
+                name="CoverBrand",
+                parent=styles["Title"],
+                fontSize=28,
+                leading=32,
+                alignment=TA_CENTER,
+                textColor=self.BRAND_BLUE,
+                spaceAfter=6,
+            )
+        )
+        styles.add(
+            ParagraphStyle(
+                name="CoverHero",
+                parent=styles["Heading1"],
+                fontSize=22,
+                leading=26,
+                alignment=TA_CENTER,
+                textColor=self.DARK,
+                spaceAfter=12,
+            )
+        )
+        styles.add(
+            ParagraphStyle(
+                name="CoverMeta",
+                parent=styles["BodyText"],
+                fontSize=11,
+                leading=16,
+                alignment=TA_CENTER,
+                textColor=self.MUTED,
+            )
+        )
+        styles.add(
+            ParagraphStyle(
+                name="SectionHead",
+                parent=styles["Heading2"],
+                fontSize=16,
+                leading=20,
+                textColor=self.BRAND_PURPLE,
+                spaceBefore=14,
+                spaceAfter=8,
+            )
+        )
+        styles.add(
+            ParagraphStyle(
+                name="SubHead",
+                parent=styles["Heading3"],
+                fontSize=12,
+                leading=15,
+                textColor=self.BRAND_BLUE,
+                spaceBefore=8,
+                spaceAfter=4,
+            )
+        )
+        styles.add(
+            ParagraphStyle(
+                name="Body",
+                parent=styles["BodyText"],
+                fontSize=10,
+                leading=14,
+                textColor=self.DARK,
+                spaceAfter=6,
+            )
+        )
+        styles.add(
+            ParagraphStyle(
+                name="DossierBullet",
+                parent=styles["BodyText"],
+                fontSize=10,
+                leading=14,
+                leftIndent=14,
+                bulletIndent=4,
+                textColor=self.DARK,
+                spaceAfter=3,
+            )
+        )
+        self._styles = styles
+        return styles
 
-    def _add_list_section(self, story, styles, title: str, items: list[str]) -> None:
-        story.append(Paragraph(title, styles["SectionTitle"]))
-        story.append(Spacer(1, 0.1 * inch))
-        for item in items:
-            story.append(Paragraph(f"• {item}", styles["BodyText"]))
-            story.append(Spacer(1, 0.05 * inch))
-        story.append(Spacer(1, 0.15 * inch))
+    def _footer(self, canvas, doc):
+        canvas.saveState()
+        canvas.setFont("Helvetica", 8)
+        canvas.setFillColor(self.MUTED)
+        canvas.drawString(48, 32, "Generated by TripMind AI")
+        canvas.drawRightString(A4[0] - 48, 32, f"Page {canvas.getPageNumber()}")
+        canvas.restoreState()
 
-    def _add_budget_section(self, story, styles, trip_package: TravelPackage) -> None:
-        story.append(Paragraph("Budget Breakdown", styles["SectionTitle"]))
-        story.append(Spacer(1, 0.1 * inch))
+    def _section_rule(self, story) -> None:
+        story.append(HRFlowable(width="100%", thickness=1, color=colors.HexColor("#E2E8F0"), spaceBefore=4, spaceAfter=10))
+
+    def _add_cover(self, story, styles, request: TravelRequest, trip_package: TravelPackage) -> None:
+        intelligence = trip_package.summary.trip_intelligence
+        analytics = trip_package.summary.analytics_summary
+        generated = datetime.utcnow().strftime("%B %d, %Y")
+
+        banner = Table(
+            [[Paragraph(f"<b>{request.destination}</b>", styles["CoverHero"])]],
+            colWidths=[6.5 * inch],
+            hAlign="CENTER",
+        )
+        banner.setStyle(
+            TableStyle(
+                [
+                    ("BACKGROUND", (0, 0), (-1, -1), self.BRAND_BLUE),
+                    ("TEXTCOLOR", (0, 0), (-1, -1), colors.white),
+                    ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+                    ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                    ("TOPPADDING", (0, 0), (-1, -1), 18),
+                    ("BOTTOMPADDING", (0, 0), (-1, -1), 18),
+                    ("ROUNDEDCORNERS", [8, 8, 8, 8]),
+                ]
+            )
+        )
+
+        story.append(Spacer(1, 0.8 * inch))
+        story.append(Paragraph("TripMind AI", styles["CoverBrand"]))
+        story.append(Paragraph("Professional Travel Dossier", styles["CoverMeta"]))
+        story.append(Spacer(1, 0.35 * inch))
+        story.append(banner)
+        story.append(Spacer(1, 0.35 * inch))
+        story.append(Paragraph(f"{request.persona} • {request.days} Days • ₹{request.budget:,}", styles["CoverMeta"]))
+        story.append(Spacer(1, 0.2 * inch))
+
+        score_table = Table(
+            [
+                ["Trip Score", "Budget Fit", "Est. Cost"],
+                [
+                    f"{intelligence.trip_score}/100",
+                    f"{intelligence.budget_fit}/100",
+                    f"₹{analytics.estimated_total_cost:,}",
+                ],
+            ],
+            colWidths=[2.1 * inch, 2.1 * inch, 2.1 * inch],
+            hAlign="CENTER",
+        )
+        score_table.setStyle(
+            TableStyle(
+                [
+                    ("BACKGROUND", (0, 0), (-1, 0), self.BRAND_PURPLE),
+                    ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+                    ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+                    ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+                    ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, self.LIGHT_BG]),
+                    ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#CBD5E1")),
+                    ("PADDING", (0, 0), (-1, -1), 10),
+                ]
+            )
+        )
+        story.append(score_table)
+        story.append(Spacer(1, 0.25 * inch))
+        story.append(Paragraph(f"Generated on {generated}", styles["CoverMeta"]))
+
+    def _add_executive_summary(self, story, styles, trip_package: TravelPackage) -> None:
+        story.append(Paragraph("Executive Summary", styles["SectionHead"]))
+        self._section_rule(story)
+        story.append(Paragraph(trip_package.summary.overall_summary, styles["Body"]))
+        if trip_package.summary.highlights:
+            story.append(Paragraph("Highlights", styles["SubHead"]))
+            for item in trip_package.summary.highlights:
+                story.append(Paragraph(f"• {item}", styles["DossierBullet"]))
+
+    def _add_trip_metrics(self, story, styles, request: TravelRequest, trip_package: TravelPackage) -> None:
+        intelligence = trip_package.summary.trip_intelligence
+        analytics = trip_package.summary.analytics_summary
+        story.append(Paragraph("Trip Metrics", styles["SectionHead"]))
+        self._section_rule(story)
         data = [
-            ["Category", "Amount"],
-            ["Accommodation", f"₹{trip_package.budget.accommodation:,}"],
-            ["Food", f"₹{trip_package.budget.food:,}"],
-            ["Transport", f"₹{trip_package.budget.transport:,}"],
-            ["Activities", f"₹{trip_package.budget.activities:,}"],
-            ["Emergency Buffer", f"₹{trip_package.budget.emergency_buffer:,}"],
+            ["Metric", "Value"],
+            ["Trip Score", f"{intelligence.trip_score}/100"],
+            ["Budget Fit", f"{intelligence.budget_fit}/100"],
+            ["Estimated Cost", f"₹{analytics.estimated_total_cost:,}"],
+            ["Difficulty", f"{analytics.difficulty_score}/100"],
+            ["Duration", f"{request.days} days"],
+            ["Persona", request.persona],
+            ["Trip Type", trip_package.summary.trip_type],
         ]
-        table = Table(data, hAlign="LEFT")
+        table = Table(data, colWidths=[2.2 * inch, 3.5 * inch], hAlign="LEFT")
         table.setStyle(
             TableStyle(
                 [
-                    ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#0F766E")),
+                    ("BACKGROUND", (0, 0), (-1, 0), self.BRAND_BLUE),
                     ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+                    ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+                    ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, self.LIGHT_BG]),
                     ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#CBD5E1")),
-                    ("BOX", (0, 0), (-1, -1), 1, colors.HexColor("#0F766E")),
-                    ("PADDING", (0, 0), (-1, -1), 6),
+                    ("PADDING", (0, 0), (-1, -1), 8),
+                    ("FONTSIZE", (0, 0), (-1, -1), 10),
+                ]
+            )
+        )
+        story.append(table)
+        story.append(Spacer(1, 0.15 * inch))
+
+    def _add_destination_intelligence(self, story, styles, trip_package: TravelPackage) -> None:
+        research = trip_package.research
+        story.append(Paragraph("Destination Intelligence", styles["SectionHead"]))
+        self._section_rule(story)
+        story.append(Paragraph(research.destination_overview, styles["Body"]))
+        story.append(Paragraph(f"<b>Best time to visit:</b> {research.best_time_to_visit}", styles["Body"]))
+        for label, items in (
+            ("Popular Areas", research.popular_areas),
+            ("Local Transport", research.local_transport),
+            ("Key Highlights", research.key_highlights),
+        ):
+            if items:
+                story.append(Paragraph(label, styles["SubHead"]))
+                for item in items:
+                    story.append(Paragraph(f"• {item}", styles["DossierBullet"]))
+
+    def _add_itinerary(self, story, styles, trip_package: TravelPackage) -> None:
+        story.append(PageBreak())
+        story.append(Paragraph("Daily Itinerary", styles["SectionHead"]))
+        self._section_rule(story)
+        for day in trip_package.itinerary.days:
+            story.append(Paragraph(f"Day {day.day}", styles["SubHead"]))
+            evening_items = list(day.evening)
+            night_items = evening_items[-1:] if len(evening_items) > 1 else []
+            evening_display = evening_items[:-1] if len(evening_items) > 1 else evening_items
+
+            for label, items in (
+                ("Morning", day.morning),
+                ("Afternoon", day.afternoon),
+                ("Evening", evening_display),
+                ("Night", night_items),
+            ):
+                story.append(Paragraph(label, styles["Body"]))
+                if not items:
+                    story.append(Paragraph("• Free time / rest", styles["DossierBullet"]))
+                for item in items:
+                    location = f" — {item.location}" if item.location else ""
+                    story.append(Paragraph(f"• <b>{item.activity}</b>{location}", styles["DossierBullet"]))
+            story.append(Spacer(1, 0.12 * inch))
+            story.append(HRFlowable(width="100%", thickness=0.5, color=colors.HexColor("#E2E8F0"), spaceAfter=8))
+
+    def _add_budget(self, story, styles, trip_package: TravelPackage) -> None:
+        budget = trip_package.budget
+        story.append(Paragraph("Budget Breakdown", styles["SectionHead"]))
+        self._section_rule(story)
+        categories = [
+            ("Accommodation", budget.accommodation),
+            ("Food", budget.food),
+            ("Transport", budget.transport),
+            ("Activities", budget.activities),
+            ("Emergency Buffer", budget.emergency_buffer),
+        ]
+        total = sum(amount for _, amount in categories) or 1
+        data = [["Category", "Amount", "Share"]]
+        for name, amount in categories:
+            pct = round(amount / total * 100, 1)
+            data.append([name, f"₹{amount:,}", f"{pct}%"])
+        table = Table(data, colWidths=[2 * inch, 1.8 * inch, 1 * inch], hAlign="LEFT")
+        table.setStyle(
+            TableStyle(
+                [
+                    ("BACKGROUND", (0, 0), (-1, 0), self.BRAND_EMERALD),
+                    ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+                    ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+                    ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, self.LIGHT_BG]),
+                    ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#CBD5E1")),
+                    ("PADDING", (0, 0), (-1, -1), 8),
+                    ("FONTSIZE", (0, 0), (-1, -1), 10),
                 ]
             )
         )
         story.append(table)
         story.append(Spacer(1, 0.1 * inch))
-        story.append(Paragraph(trip_package.budget.allocation_reasoning, styles["BodyText"]))
-        story.append(Spacer(1, 0.18 * inch))
+        story.append(Paragraph(budget.allocation_reasoning, styles["Body"]))
 
-    def _add_itinerary_section(self, story, styles, trip_package: TravelPackage) -> None:
-        story.append(Paragraph("Complete Itinerary", styles["SectionTitle"]))
-        story.append(Spacer(1, 0.1 * inch))
-        for day in trip_package.itinerary.days:
-            story.append(Paragraph(f"Day {day.day}", styles["Heading3"]))
-            for label, items in (("Morning", day.morning), ("Afternoon", day.afternoon), ("Evening", day.evening)):
-                story.append(Paragraph(label, styles["BodyText"]))
+    def _add_food_guide(self, story, styles, trip_package: TravelPackage) -> None:
+        food = trip_package.food
+        story.append(Paragraph("Food Guide", styles["SectionHead"]))
+        self._section_rule(story)
+        for label, items in (
+            ("Must Try", food.must_try_foods),
+            ("Street Food", food.street_foods),
+            ("Restaurants", food.recommended_restaurants),
+            ("Tips", food.food_tips),
+        ):
+            if items:
+                story.append(Paragraph(label, styles["SubHead"]))
                 for item in items:
-                    location_text = f" - {item.location}" if item.location else ""
-                    story.append(Paragraph(f"• {item.activity}{location_text}", styles["BodyText"]))
-            story.append(Spacer(1, 0.1 * inch))
-        story.append(Spacer(1, 0.18 * inch))
+                    story.append(Paragraph(f"• {item}", styles["DossierBullet"]))
+
+    def _add_packing(self, story, styles, trip_package: TravelPackage) -> None:
+        packing = trip_package.packing
+        story.append(Paragraph("Packing Checklist", styles["SectionHead"]))
+        self._section_rule(story)
+        for label, items in (
+            ("Documents", packing.documents),
+            ("Electronics", packing.electronics),
+            ("Weather", packing.weather_items),
+            ("Essentials", packing.essentials),
+        ):
+            if items:
+                story.append(Paragraph(label, styles["SubHead"]))
+                for item in items:
+                    story.append(Paragraph(f"☐ {item}", styles["DossierBullet"]))
+
+    def _add_safety(self, story, styles, trip_package: TravelPackage) -> None:
+        safety = trip_package.safety
+        story.append(PageBreak())
+        story.append(Paragraph("Safety Guide", styles["SectionHead"]))
+        self._section_rule(story)
+        for label, items in (
+            ("Travel Tips", safety.travel_tips),
+            ("Warnings", safety.warnings),
+            ("Local Etiquette", safety.local_etiquette),
+            ("Emergency Contacts", safety.emergency_contacts),
+        ):
+            if items:
+                story.append(Paragraph(label, styles["SubHead"]))
+                for item in items:
+                    story.append(Paragraph(f"• {item}", styles["DossierBullet"]))
+
+    def _add_insights(self, story, styles, trip_package: TravelPackage) -> None:
+        insights = trip_package.summary.ai_insights
+        story.append(Paragraph("Travel Insights", styles["SectionHead"]))
+        self._section_rule(story)
+        for label, items in (
+            ("Money Saving Tips", insights.money_saving_tips),
+            ("Hidden Gems", insights.hidden_gems),
+            ("Best Experiences", insights.best_experiences),
+            ("Avoid", insights.avoid),
+            ("Local Secrets", insights.local_secrets),
+        ):
+            if items:
+                story.append(Paragraph(label, styles["SubHead"]))
+                for item in items:
+                    story.append(Paragraph(f"• {item}", styles["DossierBullet"]))

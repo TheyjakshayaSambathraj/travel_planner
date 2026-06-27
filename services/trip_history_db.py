@@ -109,6 +109,29 @@ class TripHistoryDB:
             connection.execute("DELETE FROM trips WHERE trip_id = ?", (trip_id,))
             connection.commit()
 
+    def duplicate_trip(self, trip_id: str) -> Optional[str]:
+        record = self.load_trip(trip_id)
+        if not record:
+            return None
+        request = TravelRequest.parse_obj(json.loads(record["request_json"]))
+        package = TravelPackage.parse_obj(json.loads(record["package_json"]))
+        return self.save_trip(request, package)
+
+    def search_trips(self, query: str, limit: int = 20) -> List[Dict[str, Any]]:
+        normalized = f"%{query.strip().lower()}%"
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT trip_id, destination, budget, duration, persona, created_at, summary_json, package_json, request_json
+                FROM trips
+                WHERE LOWER(destination) LIKE ? OR LOWER(persona) LIKE ?
+                ORDER BY datetime(created_at) DESC
+                LIMIT ?
+                """,
+                (normalized, normalized, limit),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
     @staticmethod
     def _dump(value: Any) -> str:
         if hasattr(value, "model_dump"):

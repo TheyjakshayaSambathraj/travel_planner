@@ -46,20 +46,22 @@ class TravelOrchestrator:
         update("Planning itinerary...")
         itinerary = self.itinerary_agent.generate(request, research)
 
-        update("Calculating budget...")
+        update("Optimizing budget...")
         budget = self.budget_agent.generate(request, research, itinerary)
 
-        update("Finding local cuisine...")
+        update("Finding food...")
         food = self.food_agent.generate(request, research)
 
-        update("Preparing packing list...")
+        update("Packing essentials...")
         packing = self.packing_agent.generate(request, research)
 
-        update("Generating travel tips...")
+        update("Safety analysis...")
         safety = self.safety_agent.generate(request, research)
 
-        update("Generating summary...")
+        update("Generating AI summary...")
         summary = self.summary_agent.generate(request, feasibility, research, itinerary, budget, food, packing, safety)
+
+        update("Finalizing travel package...")
 
         return TravelPackage(
             feasibility=feasibility,
